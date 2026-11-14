@@ -20,5 +20,6 @@ button:hover{background:#f05551}
 .bar.indet i{width:40%;animation:slide 1.2s linear infinite}
 @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
 .live{color:#4ade80;font-weight:700}
+.small{background:#232742;color:#cfd2ff;border:1px solid #3a3f6b;padding:8px 14px;font-size:14px;margin:10px 0}
 small{color:#aab}
 .actions button{padding:6px 12px;font-size:13px;margin:8px 6px 0 0;background:#2c3260}

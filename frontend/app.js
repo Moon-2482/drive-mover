@@ -62,14 +62,25 @@ function batchHtml(b){
   return h + '</div>';
 }
 
+let showDone = false;
 async function loadBatches(){
   try{
     const d = await jget("/api/batches");
+    const all = d.batches || [];
+    const active = all.filter(b => b.status === "running" || b.status === "paused");
+    const done = all.filter(b => !(b.status === "running" || b.status === "paused"));
     document.getElementById("batches").innerHTML =
-      (d.batches || []).map(batchHtml).join("") ||
-      "<p class='hint'>Abhi koi migration nahi. Upar link paste karke Migrate dabayein.</p>";
+      active.map(batchHtml).join("") ||
+      "<p class='hint'>Abhi koi migration nahi chal rahi. Upar link paste karke Migrate dabayein.</p>";
+    const t = document.getElementById("toggleDone");
+    t.style.display = done.length ? "" : "none";
+    t.textContent = showDone ? "✓ Moved data chhupayein" : "✓ Moved data dekhein (" + done.length + ")";
+    document.getElementById("doneBatches").innerHTML =
+      showDone ? done.map(batchHtml).join("") : "";
   }catch(e){}
 }
+
+document.getElementById("toggleDone").addEventListener("click", () => { showDone = !showDone; loadBatches(); });
 
 document.getElementById("go").addEventListener("click", async () => {
   const links = document.getElementById("links").value.split("\n").filter(s => s.trim());
