@@ -2,8 +2,10 @@
 Uses async-mega (proven route, Nov 2026) with the proxy trust_env patch.
 Prints TOTAL files downloaded. Exit non-zero on failure.
 """
-import asyncio, sys
-sys.path.insert(0, "/home/hatch/workspace/.pydeps2")
+import asyncio, os, sys
+# On the local VM, async-mega lives in .pydeps2; on a host it is pip-installed.
+if os.path.isdir("/home/hatch/workspace/.pydeps2"):
+    sys.path.insert(0, "/home/hatch/workspace/.pydeps2")
 import aiohttp
 _orig_init = aiohttp.ClientSession.__init__
 def _patched_init(self, *a, **kw):

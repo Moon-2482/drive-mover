@@ -13,6 +13,8 @@ async function loadStatus(){
       el.innerHTML = "✅ Connected: <b>" + esc(s.account.name || "") + "</b> (" +
         esc(s.account.email || "") + ")<br><small>Drive use: " +
         fmt(s.quota.usageInDrive) + " / " + fmt(s.quota.limit) + "</small>";
+    } else if (s.needs_connect){
+      el.innerHTML = "Drive connect nahi hai.<br><a href='/auth/login'><button style='margin-top:8px'>🔗 Connect Google Drive</button></a>";
     } else {
       el.textContent = "❌ Drive connect nahi: " + (s.error || "?");
     }

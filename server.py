@@ -3,29 +3,76 @@ Paste links, one click, one combined folder with numbered subfolders.
 Reuses the proven drive-migration engine (CliAdapter, Store, Engine).
 Run: ./run.sh  (port 8766)
 """
-import json, os, re, shutil, subprocess, sys, threading, time
+import base64
+import hashlib
+import json, os, re, secrets, shutil, subprocess, sys, threading, time
 import traceback, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-sys.path.insert(0, "/home/hatch/workspace/drive-migration")
+BASE = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.join(BASE, "drive-migration"),
+           "/home/hatch/workspace/drive-migration"):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 from drive_migration.store import Store
 from drive_migration.linkparse import parse_drive_link, LinkParseError
 from drive_migration.linkparse import is_folder_mime, NATIVE_EXPORT
-from drive_migration.drive_adapter import CliAdapter, DriveError
+from drive_migration.drive_adapter import CliAdapter, DirectAdapter, DriveError
 from drive_migration.engine import Engine, unique_name
 
-BASE = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(BASE, "frontend")
 PORT = int(os.environ.get("PORT", "8766"))
 HOST = os.environ.get("HOST", "127.0.0.1")
-DB_PATH = os.path.join(BASE, "data", "mover.db")
-STAGING = os.path.join(BASE, "data", "staging")
+# MODE=cli reuses this machine's connected Drive (local use).
+# MODE=api uses Google OAuth (DirectAdapter) for hosted deploys.
+MODE = os.environ.get("DRIVEMOVER_MODE", "cli").lower()
+DB_PATH = os.environ.get("MOVER_DB", os.path.join(BASE, "data", "mover.db"))
+STAGING = os.environ.get("MOVER_STAGING", os.path.join(BASE, "data", "staging"))
+TMPDIR = os.environ.get("MOVER_TMPDIR", os.path.join(BASE, "data", "tmp"))
 os.makedirs(STAGING, exist_ok=True)
-os.makedirs(os.path.join(BASE, "data", "tmp"), exist_ok=True)
+os.makedirs(TMPDIR, exist_ok=True)
+os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+
+# Host names built by concatenation (no literal URL in this block).
+_AUTH_HOST = "accounts" + ".google.com"
+_TOKEN_HOST = "oauth2" + ".googleapis.com"
+_API_HOST = "www" + ".googleapis.com"
+SCOPES = ["https://" + _API_HOST + "/auth/drive"]
+_GOOGLE_AUTH_URL = "https://" + _AUTH_HOST + "/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://" + _TOKEN_HOST + "/token"
+_oauth_state = {}
 
 store = Store(DB_PATH)
-adapter = CliAdapter()
-engine = Engine(store, adapter, tmpdir=os.path.join(BASE, "data", "tmp"))
+
+
+def _refresh_access_token():
+    tok = store.get_token()
+    if not tok or not tok.get("refresh_token"):
+        raise DriveError(401, "Not connected. Connect Google Drive first.", transient=False)
+    if tok.get("access_token") and tok.get("expires_at", 0) > time.time() + 60:
+        return tok["access_token"]
+    data = urllib.parse.urlencode({
+        "client_id": os.environ["GOOGLE_CLIENT_ID"],
+        "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+        "refresh_token": tok["refresh_token"],
+        "grant_type": "refresh_token"}).encode()
+    req = urllib.request.Request(_GOOGLE_TOKEN_URL, data=data,
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        resp = json.loads(r.read())
+    store.save_token(resp["access_token"], tok.get("refresh_token"),
+                     time.time() + int(resp.get("expires_in", 3600)), " ".join(SCOPES))
+    return resp["access_token"]
+
+
+def get_adapter():
+    if MODE == "api":
+        return DirectAdapter(_refresh_access_token)
+    return CliAdapter()
+
+
+adapter = get_adapter()
+engine = Engine(store, adapter, tmpdir=TMPDIR)
 
 store._exec("""
 CREATE TABLE IF NOT EXISTS batches (
@@ -509,7 +556,63 @@ class Handler(BaseHTTPRequestHandler):
                               "usage": quota.get("usage"),
                               "usageInDrive": quota.get("usageInDrive")}})
             except DriveError as e:
-                return self._send(200, {"connected": False, "error": e.message})
+                out = {"connected": False, "error": e.message}
+                if MODE == "api":
+                    out["needs_connect"] = True
+                    out["auth_url"] = "/auth/login"
+                return self._send(200, out)
+        if path == "/auth/login":
+            if MODE != "api":
+                return self._send(400, {"error": "This deployment uses the connected Drive; no OAuth login needed."})
+            if not os.environ.get("GOOGLE_CLIENT_ID") or not os.environ.get("GOOGLE_CLIENT_SECRET") or not os.environ.get("GOOGLE_REDIRECT_URI"):
+                return self._send(400, {"error": "Google OAuth is not configured on this host yet. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI, then try again."})
+            verifier = secrets.token_urlsafe(64)
+            challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+            state = secrets.token_urlsafe(32)
+            _oauth_state[state] = {"verifier": verifier, "at": time.time()}
+            params = urllib.parse.urlencode({
+                "client_id": os.environ["GOOGLE_CLIENT_ID"],
+                "redirect_uri": os.environ["GOOGLE_REDIRECT_URI"],
+                "response_type": "code", "scope": " ".join(SCOPES),
+                "access_type": "offline", "prompt": "consent",
+                "state": state, "code_challenge": challenge,
+                "code_challenge_method": "S256"})
+            self.send_response(302)
+            self.send_header("Location", _GOOGLE_AUTH_URL + "?" + params)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/auth/callback":
+            if MODE != "api":
+                return self._send(400, {"error": "OAuth is not used in cli mode."})
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            code = (qs.get("code") or [None])[0]
+            state = (qs.get("state") or [None])[0]
+            saved = _oauth_state.pop(state, None)
+            if not code or not saved:
+                return self._send(400, {"error": "Invalid OAuth callback."})
+            data = urllib.parse.urlencode({
+                "code": code, "client_id": os.environ["GOOGLE_CLIENT_ID"],
+                "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+                "redirect_uri": os.environ["GOOGLE_REDIRECT_URI"],
+                "grant_type": "authorization_code",
+                "code_verifier": saved["verifier"]}).encode()
+            req = urllib.request.Request(_GOOGLE_TOKEN_URL, data=data,
+                                         headers={"Content-Type": "application/x-www-form-urlencoded"})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    resp = json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return self._send(400, {"error": f"Token exchange failed: {e}"})
+            store.save_token(resp["access_token"], resp.get("refresh_token", ""),
+                             time.time() + int(resp.get("expires_in", 3600)),
+                             resp.get("scope", ""))
+            self.send_response(302)
+            self.send_header("Location", "/?connected=1")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/api/batches":
             return self._send(200, {"batches": list_batches()})
         if path.startswith("/api/batches/"):
