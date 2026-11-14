@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive Mover - One Click, Sab Kuch Drive Me</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>📦 Drive Mover</h1>
+  <p class="sub">Link paste karein, ek click — sara data aapki Drive me.</p>
+  <div id="status" class="card">Drive se connect ho raha hai...</div>
+  <div class="card">
+    <label>Combined folder ka naam (khali chhodein to auto naam ban jayega)</label>
+    <input id="folderName" type="text" placeholder="jaise: Courses Bundle Nov 2026">
+    <label>Links — har line par ek link</label>
+    <textarea id="links" rows="6" placeholder="Drive folder link&#10;MEGA folder link&#10;Direct download link"></textarea>
+    <button id="go">⬇️ Migrate — One Click</button>
+    <p class="hint">Drive folder/file, MEGA folder aur direct download links chalte hain. Har link ka apna numbered folder banta hai: 01, 02, 03...</p>
+  </div>
+  <div id="batches"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
