@@ -206,6 +206,14 @@ def _upd_link(lid, **f):
     f["updated_at"] = _now()
     sets = ", ".join(f"{k}=?" for k in f)
     store._exec(f"UPDATE batch_links SET {sets} WHERE id=?", (*f.values(), lid))
+    # Keep the batch header live: every link update refreshes batch totals,
+    # so the page progress bar moves during a link instead of only after it.
+    try:
+        row = store._one("SELECT batch_id FROM batch_links WHERE id=?", (lid,))
+        if row:
+            _refresh_batch_counts(row["batch_id"])
+    except Exception:
+        pass
 
 def _refresh_batch_counts(bid):
     links = store._conn.execute(
@@ -356,11 +364,37 @@ def _process_mega_link(bid, link, combined_id):
     _upd_link(link["id"], status="running", current_file="MEGA se download ho raha hai...")
     helper = os.path.join(BASE, "mega_dl.py")
     env = dict(os.environ)
-    env["PYTHONPATH"] = "/home/hatch/workspace/.pydeps2"
-    p = subprocess.run([sys.executable, helper, info["handle"], info["key"], staging],
-                       capture_output=True, text=True, timeout=7200, env=env)
+    if os.path.isdir("/home/hatch/workspace/.pydeps2"):
+        env["PYTHONPATH"] = "/home/hatch/workspace/.pydeps2"
+    # Non-blocking download + live monitor: every 2s report staging size,
+    # file count and newest file, so the page shows real movement while
+    # MEGA downloads (previously nothing updated until the whole download
+    # finished and the batch header stayed 0/0).
+    p = subprocess.Popen([sys.executable, helper, info["handle"], info["key"], staging],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    dl_start = time.time()
+    while p.poll() is None:
+        total_b = 0; n = 0; newest = None; newest_mt = 0.0
+        for dp, dn, fn in os.walk(staging):
+            for f in fn:
+                fp = os.path.join(dp, f)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                total_b += st.st_size; n += 1
+                if st.st_mtime > newest_mt:
+                    newest_mt = st.st_mtime; newest = os.path.relpath(fp, staging)
+        _upd_link(link["id"], bytes_done=total_b, done_files=n,
+                  current_file=newest or "MEGA se download ho raha hai...")
+        if p.poll() is None:
+            if time.time() - dl_start > 7200:
+                p.kill()
+                raise DriveError(500, "MEGA download timed out (2h).")
+            time.sleep(2)
+    out, err = p.communicate()
     if p.returncode != 0:
-        raise DriveError(500, "MEGA download failed: " + (p.stderr or p.stdout or "?")[-500:])
+        raise DriveError(500, "MEGA download failed: " + (err or out or "?")[-500:])
     tops = [d for d in os.listdir(staging)
             if os.path.isdir(os.path.join(staging, d))]
     files = [f for f in os.listdir(staging)

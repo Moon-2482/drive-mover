@@ -17,5 +17,8 @@ button:hover{background:#f05551}
 .st.running,.st.scanning{color:#ffc800}.st.queued{color:#aab}
 .bar{height:8px;background:#0f1226;border-radius:4px;overflow:hidden;margin:6px 0}
 .bar i{display:block;height:100%;background:#e53935}
+.bar.indet i{width:40%;animation:slide 1.2s linear infinite}
+@keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
+.live{color:#4ade80;font-weight:700}
 small{color:#aab}
 .actions button{padding:6px 12px;font-size:13px;margin:8px 6px 0 0;background:#2c3260}

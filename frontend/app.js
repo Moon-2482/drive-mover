@@ -24,9 +24,12 @@ async function loadStatus(){
 function batchHtml(b){
   const tot = b.total_files || 0, done = b.done_files || 0;
   const pct = tot ? Math.round(done / tot * 100) : (b.status === "completed" ? 100 : 0);
+  const live = (b.status === "running") ?
+    ' <span class="live">● LIVE</span> <small>' +
+    new Date().toLocaleTimeString("en-GB") + '</small>' : "";
   let h = '<div class="batch"><h3>' + esc(b.combined_folder_name || b.name || "Batch") +
     ' <small>#' + b.id.slice(0, 8) + '</small></h3>' +
-    '<div>Status: <b>' + esc(b.status) + '</b> — Links: ' + b.done_links + '/' +
+    '<div>Status: <b>' + esc(b.status) + '</b>' + live + ' — Links: ' + b.done_links + '/' +
     b.total_links + ' — Files: ' + done + '/' + tot + ' (' + fmt(b.bytes_done) + ' / ' +
     fmt(b.total_bytes) + ')</div><div class="bar"><i style="width:' + pct + '%"></i></div>';
   if (b.status === "running" || b.status === "paused"){
@@ -43,9 +46,16 @@ function batchHtml(b){
     h += '<div class="link"><span class="st ' + l.status + '">' + l.status + '</span>' +
       '<b>' + l.seq + '.</b> ' + esc(l.dest_folder_name || l.source_name || l.kind) +
       ' <small>(' + esc(l.kind) + ')</small><br><small>' + esc(l.url) + '</small>';
-    if (l.total_files) h += '<br><small>Files: ' + l.done_files + '/' + l.total_files +
-      ' — ' + fmt(l.bytes_done) + ' / ' + fmt(l.total_bytes) + '</small>';
-    if (l.current_file) h += '<br><small>▶ ' + esc(l.current_file) + '</small>';
+    if (l.status === "running" && !l.total_bytes && l.bytes_done > 0){
+      h += '<br><small>⬇ Download ho raha hai: <b>' + fmt(l.bytes_done) + '</b> — ' +
+        l.done_files + ' files abhi tak</small><div class="bar indet"><i></i></div>';
+    } else if (l.total_files){
+      const lp = Math.round(l.done_files / l.total_files * 100);
+      h += '<br><small>Files: ' + l.done_files + '/' + l.total_files +
+        ' — ' + fmt(l.bytes_done) + ' / ' + fmt(l.total_bytes) + '</small>' +
+        '<div class="bar"><i style="width:' + lp + '%"></i></div>';
+    }
+    if (l.current_file) h += '<small>▶ ' + esc(l.current_file) + '</small>';
     if (l.error) h += '<br><small style="color:#ff8a80">⚠ ' + esc(l.error) + '</small>';
     h += '</div>';
   }
