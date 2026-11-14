@@ -32,3 +32,14 @@ session on that machine. No tokens or secrets live in this repo.
 - This repo is code only. The app needs a running Python host with Drive
   access — static hosting alone cannot run the backend.
 - Test batch (2026-11-14): 10/10 files copied and verified in Drive.
+
+## Hosts
+
+- **Hugging Face Spaces (Docker): NOT free** — verified 2026-11-14: the Hub API
+  returns 402, Docker/Gradio Spaces on free cpu-basic need a PRO subscription.
+  Do not retry without the user's explicit paid approval.
+- **Render (free tier):** Blueprint deploy — `render.yaml` is in this repo.
+  Free instances sleep after 15 min without traffic and have no persistent
+  disk (job history resets on restart; files already in Drive are unaffected).
+  Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI in the
+  Render dashboard, then open the app and tap "Connect Google Drive".
